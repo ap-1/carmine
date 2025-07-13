@@ -105,7 +105,7 @@ pub async fn start() {
     let client: Arc<SlackHyperClient> =
         Arc::new(SlackClient::new(SlackClientHyperConnector::new().unwrap()));
 
-    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], 8080));
+    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], 8080));
     println!("Loading server: {}", addr);
 
     let oauth_listener_config = SlackOAuthListenerConfig::new(
