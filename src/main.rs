@@ -7,6 +7,8 @@ mod commands;
 async fn main() {
     dotenvy::dotenv().ok();
 
-    discord::start().await;
-    slack::start().await;
+    tokio::join!(
+        discord::start(),
+        slack::start()
+    );
 }
