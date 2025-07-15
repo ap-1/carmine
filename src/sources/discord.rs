@@ -47,7 +47,7 @@ impl EventHandler for Handler {
         message_id: serenity::MessageId,
         guild_id: Option<serenity::GuildId>,
     ) {
-        println!("Message deleted: {} in channel {}", message_id, channel_id);
+        println!("Message deleted: {message_id} in channel {channel_id}");
     }
 
     async fn message_update(
@@ -57,31 +57,28 @@ impl EventHandler for Handler {
         new: Option<serenity::Message>,
         _event: serenity::MessageUpdateEvent,
     ) {
-        println!("Message updated: {:?}", new);
+        println!("Message updated: {new:?}");
     }
 }
 
 async fn get_discord_channel_id(slack_channel_id: &str, redis_client: &RedisClient) -> Option<u64> {
     match redis_client
-        .get_linked_discord_channel(&slack_channel_id)
+        .get_linked_discord_channel(slack_channel_id)
         .await
     {
         Ok(Some(channel_str)) => match channel_str.parse::<u64>() {
             Ok(id) => Some(id),
             Err(_) => {
-                eprintln!("Invalid Discord channel ID format: {}", channel_str);
+                eprintln!("Invalid Discord channel ID format: {channel_str}");
                 None
             }
         },
         Ok(None) => {
-            eprintln!(
-                "No linked Discord channel found for Slack channel: {}",
-                slack_channel_id
-            );
+            eprintln!("No linked Discord channel found for Slack channel: {slack_channel_id}");
             None
         }
         Err(e) => {
-            eprintln!("Error fetching Discord channel ID: {}", e);
+            eprintln!("Error fetching Discord channel ID: {e}");
             None
         }
     }
@@ -96,7 +93,7 @@ async fn get_or_create_webhook(
     let webhooks = match channel.webhooks(&ctx.http).await {
         Ok(webhooks) => webhooks,
         Err(e) => {
-            eprintln!("Failed to get webhooks: {}", e);
+            eprintln!("Failed to get webhooks: {e}");
             return None;
         }
     };
@@ -116,7 +113,7 @@ async fn get_or_create_webhook(
     {
         Ok(webhook) => Some(webhook),
         Err(e) => {
-            eprintln!("Failed to create webhook: {}", e);
+            eprintln!("Failed to create webhook: {e}");
             None
         }
     }
@@ -160,7 +157,7 @@ async fn send_message_to_discord(
             None
         }
         Err(e) => {
-            eprintln!("Failed to send webhook message: {}", e);
+            eprintln!("Failed to send webhook message: {e}");
             None
         }
     }
@@ -180,14 +177,14 @@ async fn handle_message_deletion(
         {
             Ok(vec) if vec.len() == 2 => [vec[0], vec[1]],
             _ => {
-                eprintln!("Invalid Discord message mapping: {}", discord_info);
+                eprintln!("Invalid Discord message mapping: {discord_info}");
                 return;
             }
         };
 
         let channel = serenity::ChannelId::new(channel_id);
         if let Err(e) = channel.delete_message(&ctx.http, message_id).await {
-            eprintln!("Failed to delete Discord message: {}", e);
+            eprintln!("Failed to delete Discord message: {e}");
         }
 
         // Clean up mapping
@@ -212,7 +209,7 @@ async fn handle_message_edit(
         {
             Ok(vec) if vec.len() == 2 => [vec[0], vec[1]],
             _ => {
-                eprintln!("Invalid Discord message mapping: {}", discord_info);
+                eprintln!("Invalid Discord message mapping: {discord_info}");
                 return;
             }
         };
@@ -226,7 +223,7 @@ async fn handle_message_edit(
             )
             .await
         {
-            eprintln!("Failed to edit Discord message: {}", e);
+            eprintln!("Failed to edit Discord message: {e}");
         }
     }
 }
@@ -236,7 +233,7 @@ async fn handle_bridge_event(ctx: &serenity::Context, team_id: &str, event: Brid
         return; // Ignore events from other workspaces
     }
 
-    let redis_client = get_data(&ctx).await.redis_client;
+    let redis_client = get_data(ctx).await.redis_client;
 
     match &event.event_type {
         EventType::MessageSent {
@@ -244,7 +241,7 @@ async fn handle_bridge_event(ctx: &serenity::Context, team_id: &str, event: Brid
             message_id,
         } => {
             if let Some(discord_message) =
-                send_message_to_discord(ctx, &event, &content, &redis_client).await
+                send_message_to_discord(ctx, &event, content, &redis_client).await
             {
                 // Store message mapping in Redis
                 if let Err(e) = redis_client
@@ -252,22 +249,22 @@ async fn handle_bridge_event(ctx: &serenity::Context, team_id: &str, event: Brid
                         discord_message.channel_id.into(),
                         discord_message.id.into(),
                         &event.channel_id,
-                        &message_id,
+                        message_id,
                     )
                     .await
                 {
-                    eprintln!("Failed to store message mapping: {}", e);
+                    eprintln!("Failed to store message mapping: {e}");
                 }
             }
         }
         EventType::MessageDeleted { message_id } => {
-            handle_message_deletion(ctx, &message_id, &redis_client).await;
+            handle_message_deletion(ctx, message_id, &redis_client).await;
         }
         EventType::MessageEdited {
             message_id,
             new_content,
         } => {
-            handle_message_edit(ctx, &message_id, &new_content, &redis_client).await;
+            handle_message_edit(ctx, message_id, new_content, &redis_client).await;
         }
         _ => {
             println!("Unhandled event type: {:?}", event.event_type);

@@ -26,7 +26,7 @@ async fn oauth_install_function(
     _client: Arc<SlackHyperClient>,
     _states: SlackClientEventsUserState,
 ) {
-    println!("{:#?}", resp);
+    println!("{resp:#?}");
 }
 
 async fn welcome_installed() -> String {
@@ -46,7 +46,7 @@ async fn push_event(
     Extension(bridge): Extension<Arc<BridgeChannels>>,
     Extension(event): Extension<SlackPushEvent>,
 ) -> Response<BoxBody<Bytes, Infallible>> {
-    println!("Received push event: {:?}", event);
+    println!("Received push event: {event:?}");
 
     match event {
         SlackPushEvent::UrlVerification(url_ver) => {
@@ -58,16 +58,16 @@ async fn push_event(
             team_id,
             ..
         }) => {
-            if let Some(bridge_event) = create_bridge_event(message_event, team_id) {
-                if let Err(e) = bridge.to_discord.send(bridge_event) {
-                    eprintln!("Failed to send bridge event: {}", e);
-                }
+            if let Some(bridge_event) = create_bridge_event(message_event, team_id)
+                && let Err(e) = bridge.to_discord.send(bridge_event)
+            {
+                eprintln!("Failed to send bridge event: {e}");
             }
 
             Response::new(Empty::new().boxed())
         }
         _ => {
-            println!("Other event type: {:?}", event);
+            println!("Other event type: {event:?}");
             Response::new(Empty::new().boxed())
         }
     }
@@ -150,7 +150,7 @@ async fn command_event(
     Extension(redis_client): Extension<Arc<RedisClient>>,
     Extension(event): Extension<SlackCommandEvent>,
 ) -> axum::Json<SlackCommandEventResponse> {
-    println!("Received command event: {:?}", event);
+    println!("Received command event: {event:?}");
 
     let response = match event.command.0.as_str() {
         "/link-channel" => handle_link_channel(event, redis_client).await,
@@ -171,7 +171,7 @@ async fn interaction_event(
     Extension(_environment): Extension<Arc<SlackHyperListenerEnvironment>>,
     Extension(event): Extension<SlackInteractionEvent>,
 ) {
-    println!("Received interaction event: {:?}", event);
+    println!("Received interaction event: {event:?}");
 }
 
 fn error_handler(
@@ -179,7 +179,7 @@ fn error_handler(
     _client: Arc<SlackHyperClient>,
     _states: SlackClientEventsUserState,
 ) -> HttpStatusCode {
-    println!("{:#?}", err);
+    println!("{err:#?}");
 
     // Defines what we return Slack server
     HttpStatusCode::BAD_REQUEST
@@ -201,13 +201,13 @@ pub async fn start(
         std::env::var("SLACK_SIGNING_SECRET").expect("SLACK_SIGNING_SECRET must be set");
 
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], 8080));
-    println!("Loading server: {}", addr);
+    println!("Loading server: {addr}");
 
     let oauth_listener_config = SlackOAuthListenerConfig::new(
         slack_client_id.into(),
         slack_client_secret.into(),
-        slack_bot_scope.into(),
-        slack_redirect_host.into(),
+        slack_bot_scope,
+        slack_redirect_host,
     );
 
     let listener_environment: Arc<SlackHyperListenerEnvironment> = Arc::new(

@@ -29,12 +29,11 @@ pub async fn handle_unlink_channel(
             .await
         {
             Ok(_) => SlackCommandEventResponse::new(SlackMessageContent::new().with_text(format!(
-                "Successfully unlinked Discord channel `{}` from this Slack channel",
-                discord_channel_id
+                "Successfully unlinked Discord channel `{discord_channel_id}` from this Slack channel"
             ))),
             Err(e) => SlackCommandEventResponse::new(
                 SlackMessageContent::new()
-                    .with_text(format!("Error unlinking Discord channel: {}", e)),
+                    .with_text(format!("Error unlinking Discord channel: {e}")),
             ),
         }
     } else {
@@ -68,8 +67,7 @@ pub async fn unlink_channel(ctx: Context<'_>) -> Result<(), Error> {
             ctx.send(
                 poise::CreateReply::default()
                     .content(format!(
-                        "Successfully unlinked Slack channel **`{}`** from this Discord channel",
-                        slack_channel_id
+                        "Successfully unlinked Slack channel **`{slack_channel_id}`** from this Discord channel"
                     ))
                     .allowed_mentions(CreateAllowedMentions::new().replied_user(false))
                     .reply(true),

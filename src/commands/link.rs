@@ -20,16 +20,14 @@ pub async fn handle_link_channel(
     {
         // Store the mapping in Redis
         match redis_client
-            .link_channels(discord_channel_id, &event.channel_id.to_string())
+            .link_channels(discord_channel_id, event.channel_id.as_ref())
             .await
         {
             Ok(_) => SlackCommandEventResponse::new(SlackMessageContent::new().with_text(format!(
-                "Successfully linked Discord channel `{}` to this Slack channel",
-                discord_channel_id
+                "Successfully linked Discord channel `{discord_channel_id}` to this Slack channel"
             ))),
             Err(e) => SlackCommandEventResponse::new(
-                SlackMessageContent::new()
-                    .with_text(format!("Error linking Discord channel: {}", e)),
+                SlackMessageContent::new().with_text(format!("Error linking Discord channel: {e}")),
             ),
         }
     } else {
@@ -66,8 +64,7 @@ pub async fn link_channel(
             ctx.send(
                 poise::CreateReply::default()
                     .content(format!(
-                        "Successfully linked Slack channel **`{}`** to this Discord channel",
-                        channel_name
+                        "Successfully linked Slack channel **`{channel_name}`** to this Discord channel",
                     ))
                     .allowed_mentions(CreateAllowedMentions::new().replied_user(false))
                     .reply(true),
@@ -79,7 +76,7 @@ pub async fn link_channel(
         Err(e) => {
             ctx.send(
                 poise::CreateReply::default()
-                    .content(format!("Error linking Slack channel: {}", e))
+                    .content(format!("Error linking Slack channel: {e}"))
                     .allowed_mentions(CreateAllowedMentions::new().replied_user(false))
                     .reply(true),
             )
@@ -103,7 +100,7 @@ async fn verify_and_join_slack_channel(
     let channel_info = session
         .conversations_info(&channel_info_req)
         .await
-        .map_err(|e| format!("Failed to get channel info: {}", e))?;
+        .map_err(|e| format!("Failed to get channel info: {e}"))?;
     let channel_name = channel_info
         .channel
         .name
@@ -112,14 +109,14 @@ async fn verify_and_join_slack_channel(
 
     // Join the channel if not already a member
     match channel_info.channel.flags.is_member {
-        Some(true) => return Ok(channel_name),
+        Some(true) => Ok(channel_name),
         _ => {
             let join_req =
                 SlackApiConversationsJoinRequest::new(SlackChannelId::new(channel_id.to_string()));
 
             match session.conversations_join(&join_req).await {
                 Ok(_) => Ok(channel_name),
-                Err(e) => Err(format!("Failed to join channel '{}': {}", channel_name, e)),
+                Err(e) => Err(format!("Failed to join channel '{channel_name}': {e}")),
             }
         }
     }

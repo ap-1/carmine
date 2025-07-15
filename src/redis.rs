@@ -82,9 +82,9 @@ impl RedisClient {
         let discord_info = format!("{discord_channel_id}:{discord_message_id}");
         let slack_info = format!("{slack_channel_id}:{slack_message_ts}");
 
-        conn.set(&format!("discord_msg:{discord_message_id}"), &slack_info)
+        conn.set(format!("discord_msg:{discord_message_id}"), &slack_info)
             .await?;
-        conn.set(&format!("slack_msg:{slack_message_ts}"), &discord_info)
+        conn.set(format!("slack_msg:{slack_message_ts}"), &discord_info)
             .await?;
 
         Ok(())
@@ -92,12 +92,12 @@ impl RedisClient {
 
     pub async fn get_slack_message(&self, discord_message_id: u64) -> RedisResult<Option<String>> {
         let mut conn = self.get_connection().await?;
-        conn.get(&format!("discord_msg:{discord_message_id}")).await
+        conn.get(format!("discord_msg:{discord_message_id}")).await
     }
 
     pub async fn get_discord_message(&self, slack_message_ts: &str) -> RedisResult<Option<String>> {
         let mut conn = self.get_connection().await?;
-        conn.get(&format!("slack_msg:{slack_message_ts}")).await
+        conn.get(format!("slack_msg:{slack_message_ts}")).await
     }
 
     pub async fn delete_message_mapping_from_slack(
@@ -110,7 +110,7 @@ impl RedisClient {
         if let Some(discord_info) = self.get_discord_message(slack_message_ts).await? {
             match discord_info.split(':').collect::<Vec<_>>().as_slice() {
                 [_, message_id] => {
-                    conn.del(&format!("discord_msg:{message_id}")).await?;
+                    conn.del(format!("discord_msg:{message_id}")).await?;
                 }
                 _ => {
                     return Err(RedisError::from((
@@ -121,7 +121,7 @@ impl RedisClient {
             }
         }
 
-        conn.del(&format!("slack_msg:{slack_message_ts}")).await?;
+        conn.del(format!("slack_msg:{slack_message_ts}")).await?;
         Ok(())
     }
 
@@ -135,7 +135,7 @@ impl RedisClient {
         if let Some(slack_info) = self.get_slack_message(discord_message_id).await? {
             match slack_info.split(':').collect::<Vec<_>>().as_slice() {
                 [_, slack_message_ts] => {
-                    conn.del(&format!("slack_msg:{slack_message_ts}")).await?;
+                    conn.del(format!("slack_msg:{slack_message_ts}")).await?;
                 }
                 _ => {
                     return Err(RedisError::from((
@@ -146,7 +146,7 @@ impl RedisClient {
             }
         }
 
-        conn.del(&format!("discord_msg:{discord_message_id}"))
+        conn.del(format!("discord_msg:{discord_message_id}"))
             .await?;
         Ok(())
     }

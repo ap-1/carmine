@@ -1,12 +1,6 @@
 use tokio::sync::mpsc;
 
 #[derive(Debug, Clone)]
-pub enum MessageSource {
-    Discord,
-    Slack,
-}
-
-#[derive(Debug, Clone)]
 pub struct BridgeEvent {
     pub event_type: EventType,
     pub author_name: String,
