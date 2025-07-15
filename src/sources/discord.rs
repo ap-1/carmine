@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
+use poise::serenity_prelude::EditWebhookMessage;
 use poise::serenity_prelude::{
-    self as serenity, CreateWebhook, EditMessage, EventHandler, ExecuteWebhook, prelude::TypeMapKey,
+    self as serenity, CreateWebhook, EventHandler, ExecuteWebhook, prelude::TypeMapKey,
 };
 use slack_morphism::prelude::SlackHyperClient;
 use tokio::sync::mpsc;
@@ -204,16 +205,23 @@ async fn handle_message_edit(
             }
         };
 
-        let channel = serenity::ChannelId::new(channel_id);
-        if let Err(e) = channel
+        let webhook = match get_or_create_webhook(ctx, channel_id).await {
+            Some(webhook) => webhook,
+            None => {
+                eprintln!("Failed to get or create webhook for editing message");
+                return;
+            }
+        };
+
+        if let Err(e) = webhook
             .edit_message(
                 &ctx.http,
-                message_id,
-                EditMessage::new().content(new_content),
+                message_id.into(),
+                EditWebhookMessage::new().content(new_content),
             )
             .await
         {
-            eprintln!("Failed to edit Discord message: {e}");
+            eprintln!("Failed to edit Discord message via webhook: {}", e);
         }
     }
 }
