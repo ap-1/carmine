@@ -117,7 +117,17 @@ async fn create_bridge_event(
     let team_id_str = team_id.to_string();
 
     // Extract user info
-    let user_id = message_event.sender.user;
+    let message_edited = message_event.message.clone();
+    let user_id = match message_event.subtype {
+        Some(SlackMessageEventType::MessageChanged) => {
+            // For edits, get user from message.sender
+            message_edited.as_ref().and_then(|m| m.sender.user.clone())
+        }
+        _ => {
+            // For regular messages, use main sender
+            message_event.sender.user
+        }
+    };
     let (author_name, author_avatar) = get_user_info(user_id, slack_client).await;
 
     let event_type = match message_event.subtype {
@@ -134,15 +144,20 @@ async fn create_bridge_event(
             }
         }
         Some(SlackMessageEventType::MessageChanged) => {
+            // For edited messages, use the original message's timestamp
+            let original_message_ts = message_edited.as_ref()?.ts.to_string();
+
             // For edited messages, the new content is in message.content, not the content field
-            let new_content = message_event
-                .message?
-                .content?
+            let new_content = message_edited
+                .as_ref()?
+                .content
+                .as_ref()?
                 .text
+                .clone()
                 .unwrap_or_else(|| "Failed to get message content".to_string());
 
             EventType::MessageEdited {
-                message_id: message_ts.clone(),
+                message_id: original_message_ts,
                 new_content,
             }
         }
