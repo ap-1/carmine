@@ -84,20 +84,24 @@ async fn get_user_info(
 
     let session = slack_client.open_session(&slack_token);
 
-    if let Some(user_id) = user_id
+    if let Some(ref user_id) = user_id
         && let Ok(response) = session
-            .users_info(&SlackApiUsersInfoRequest::new(user_id))
+            .users_info(&SlackApiUsersInfoRequest::new(user_id.clone()))
             .await
-        && let Some(profile) = response.user.profile
+        && let Some(ref profile) = response.user.profile
     {
-        let name = profile
-            .display_name
-            .or(profile.real_name)
-            .unwrap_or_else(|| "Unknown User".to_string());
+        let name = response
+            .user
+            .name
+            .or(response.user.real_name)
+            .or(profile.display_name.clone())
+            .or(profile.real_name.clone())
+            .unwrap_or(format!("User-{}", user_id.to_string()));
 
         let avatar = profile
             .icon
-            .and_then(|i| i.image_original)
+            .as_ref()
+            .and_then(|i| i.image_original.clone())
             .unwrap_or_default();
 
         (name, avatar)
