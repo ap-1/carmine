@@ -1,3 +1,5 @@
+use std::{convert::Infallible, sync::Arc};
+
 use axum::Extension;
 use axum::body::Bytes;
 use axum::http::Response;
@@ -5,15 +7,19 @@ use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Empty, Full};
 use slack_morphism::prelude::*;
 use slack_morphism::{
-    SlackClient, SlackSigningSecret,
+    SlackSigningSecret,
     prelude::{
-        SlackClientEventsListenerEnvironment, SlackClientHyperConnector, SlackEventsAxumListener,
-        SlackHyperClient, SlackHyperHttpsConnector, SlackHyperListenerEnvironment,
-        SlackOAuthListenerConfig,
+        SlackClientEventsListenerEnvironment, SlackEventsAxumListener, SlackHyperClient,
+        SlackHyperHttpsConnector, SlackHyperListenerEnvironment, SlackOAuthListenerConfig,
     },
 };
-use std::{convert::Infallible, sync::Arc};
 use tokio::net::TcpListener;
+use tokio::sync::mpsc;
+
+use crate::bridge::{BridgeChannels, BridgeEvent, EventType};
+use crate::commands::link::handle_link_channel;
+use crate::commands::unlink::handle_unlink_channel;
+use crate::redis::RedisClient;
 
 async fn oauth_install_function(
     resp: SlackOAuthV2AccessTokenResponse,
@@ -37,6 +43,7 @@ async fn error_install() -> String {
 
 async fn push_event(
     Extension(_environment): Extension<Arc<SlackHyperListenerEnvironment>>,
+    Extension(bridge): Extension<Arc<BridgeChannels>>,
     Extension(event): Extension<SlackPushEvent>,
 ) -> Response<BoxBody<Bytes, Infallible>> {
     println!("Received push event: {:?}", event);
@@ -48,12 +55,14 @@ async fn push_event(
         }
         SlackPushEvent::EventCallback(SlackPushEventCallback {
             event: SlackEventCallbackBody::Message(message_event),
+            team_id,
             ..
         }) => {
-            println!("New message received");
-            println!("Channel: {:?}", message_event.origin.channel);
-            println!("Origin: {:?}", message_event.origin);
-            println!("Content: {:?}", message_event.content);
+            if let Some(bridge_event) = create_bridge_event(message_event, team_id) {
+                if let Err(e) = bridge.to_discord.send(bridge_event) {
+                    eprintln!("Failed to send bridge event: {}", e);
+                }
+            }
 
             Response::new(Empty::new().boxed())
         }
@@ -64,14 +73,98 @@ async fn push_event(
     }
 }
 
+fn create_bridge_event(
+    message_event: SlackMessageEvent,
+    team_id: SlackTeamId,
+) -> Option<BridgeEvent> {
+    // Extract common metadata
+    let message_ts = message_event.origin.ts.to_string();
+    let channel_id = message_event.origin.channel?.to_string();
+    let team_id_str = team_id.to_string();
+
+    // Extract user info
+    let author_name = message_event
+        .sender
+        .username
+        .unwrap_or("Unknown User".to_string());
+
+    let author_avatar = message_event
+        .sender
+        .user_profile
+        .and_then(|profile| profile.icon)
+        .and_then(|icon| icon.image_original);
+
+    let event_type = match message_event.subtype {
+        None => {
+            // Regular message
+            let content = message_event
+                .content?
+                .text
+                .unwrap_or_else(|| "Failed to get message content".to_string());
+
+            EventType::MessageSent {
+                message_id: message_ts.clone(),
+                content,
+            }
+        }
+        Some(SlackMessageEventType::MessageChanged) => {
+            // For edited messages, the new content is in message.content, not the content field
+            let new_content = message_event
+                .message?
+                .content?
+                .text
+                .unwrap_or_else(|| "Failed to get message content".to_string());
+
+            EventType::MessageEdited {
+                message_id: message_ts.clone(),
+                new_content,
+            }
+        }
+        Some(SlackMessageEventType::MessageDeleted) => {
+            let deleted_message_id = message_event
+                .deleted_ts
+                .map(|ts| ts.to_string())
+                .expect("Deleted message did not have a timestamp");
+
+            EventType::MessageDeleted {
+                message_id: deleted_message_id,
+            }
+        }
+        _ => {
+            println!("Unhandled message subtype: {:?}", message_event.subtype);
+            return None;
+        }
+    };
+
+    Some(BridgeEvent {
+        event_type,
+        author_name,
+        author_avatar,
+        channel_id,
+        team_id: team_id_str,
+    })
+}
+
 async fn command_event(
     Extension(_environment): Extension<Arc<SlackHyperListenerEnvironment>>,
+    Extension(redis_client): Extension<Arc<RedisClient>>,
     Extension(event): Extension<SlackCommandEvent>,
 ) -> axum::Json<SlackCommandEventResponse> {
     println!("Received command event: {:?}", event);
-    axum::Json(SlackCommandEventResponse::new(
-        SlackMessageContent::new().with_text("Working on it".into()),
-    ))
+
+    let response = match event.command.0.as_str() {
+        "/link-channel" => handle_link_channel(event, redis_client).await,
+        "/unlink-channel" => handle_unlink_channel(event, redis_client).await,
+        "/help" => SlackCommandEventResponse::new(
+            SlackMessageContent::new()
+                .with_text("Available commands: /link-channel, /unlink-channel, /help".into()),
+        ),
+        _ => SlackCommandEventResponse::new(
+            SlackMessageContent::new().with_text("Unknown command".into()),
+        ),
+    };
+
+    axum::Json(response)
 }
 
 async fn interaction_event(
@@ -92,7 +185,12 @@ fn error_handler(
     HttpStatusCode::BAD_REQUEST
 }
 
-pub async fn start() {
+pub async fn start(
+    channels: BridgeChannels,
+    slack_rx: mpsc::UnboundedReceiver<BridgeEvent>,
+    redis_client: RedisClient,
+    slack_client: Arc<SlackHyperClient>,
+) {
     let slack_client_id = std::env::var("SLACK_CLIENT_ID").expect("SLACK_CLIENT_ID must be set");
     let slack_client_secret =
         std::env::var("SLACK_CLIENT_SECRET").expect("SLACK_CLIENT_SECRET must be set");
@@ -101,9 +199,6 @@ pub async fn start() {
         std::env::var("SLACK_REDIRECT_HOST").expect("SLACK_REDIRECT_HOST must be set");
     let slack_signing_secret =
         std::env::var("SLACK_SIGNING_SECRET").expect("SLACK_SIGNING_SECRET must be set");
-
-    let client: Arc<SlackHyperClient> =
-        Arc::new(SlackClient::new(SlackClientHyperConnector::new().unwrap()));
 
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], 8080));
     println!("Loading server: {}", addr);
@@ -116,12 +211,14 @@ pub async fn start() {
     );
 
     let listener_environment: Arc<SlackHyperListenerEnvironment> = Arc::new(
-        SlackClientEventsListenerEnvironment::new(client.clone()).with_error_handler(error_handler),
+        SlackClientEventsListenerEnvironment::new(slack_client.clone())
+            .with_error_handler(error_handler),
     );
     let signing_secret: SlackSigningSecret = slack_signing_secret.into();
 
     let listener: SlackEventsAxumListener<SlackHyperHttpsConnector> =
         SlackEventsAxumListener::new(listener_environment.clone());
+    let bridge_channels = Arc::new(channels);
 
     // Build application route with OAuth nested router and Push/Command/Interaction events
     let app = axum::routing::Router::new()
@@ -155,7 +252,9 @@ pub async fn start() {
                     .events_layer(&signing_secret)
                     .with_event_extractor(SlackEventsExtractors::interaction_event()),
             ),
-        );
+        )
+        .layer(Extension(bridge_channels))
+        .layer(Extension(redis_client));
 
     axum::serve(TcpListener::bind(&addr).await.unwrap(), app)
         .await
