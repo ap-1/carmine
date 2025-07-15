@@ -51,8 +51,8 @@ pub async fn link_channel(
     let data = ctx.data();
     let redis_client = &data.redis_client;
 
-    let bot_token = std::env::var("SLACK_BOT_TOKEN").expect("SLACK_BOT_TOKEN must be set");
-    let slack_token = SlackApiToken::new(bot_token.into());
+    let oauth_token = std::env::var("SLACK_OAUTH_TOKEN").expect("SLACK_OAUTH_TOKEN must be set");
+    let slack_token = SlackApiToken::new(oauth_token.into());
 
     match verify_and_join_slack_channel(&data.slack_client, &slack_token, &slack_channel_id).await {
         Ok(channel_name) => {
