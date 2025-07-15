@@ -135,7 +135,7 @@ async fn send_message_to_discord(
     match webhook
         .execute(
             &ctx.http,
-            false,
+            true,
             ExecuteWebhook::new()
                 .username(&event.author_name)
                 .avatar_url(avatar_url)
