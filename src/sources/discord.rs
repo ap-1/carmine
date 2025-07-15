@@ -130,15 +130,13 @@ async fn send_message_to_discord(
     };
 
     // Send message via webhook
-    let avatar_url = event.author_avatar.as_deref().unwrap_or("");
-
     match webhook
         .execute(
             &ctx.http,
             true,
             ExecuteWebhook::new()
                 .username(&event.author_name)
-                .avatar_url(avatar_url)
+                .avatar_url(&event.author_avatar)
                 .content(content),
         )
         .await

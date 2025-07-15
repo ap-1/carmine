@@ -4,7 +4,7 @@ use tokio::sync::mpsc;
 pub struct BridgeEvent {
     pub event_type: EventType,
     pub author_name: String,
-    pub author_avatar: Option<String>,
+    pub author_avatar: String,
     pub channel_id: String,
     pub team_id: String,
 }

@@ -44,6 +44,7 @@ async fn error_install() -> String {
 async fn push_event(
     Extension(_environment): Extension<Arc<SlackHyperListenerEnvironment>>,
     Extension(bridge): Extension<Arc<BridgeChannels>>,
+    Extension(slack_client): Extension<Arc<SlackHyperClient>>,
     Extension(event): Extension<SlackPushEvent>,
 ) -> Response<BoxBody<Bytes, Infallible>> {
     println!("Received push event: {event:?}");
@@ -58,7 +59,8 @@ async fn push_event(
             team_id,
             ..
         }) => {
-            if let Some(bridge_event) = create_bridge_event(message_event, team_id)
+            if let Some(bridge_event) =
+                create_bridge_event(message_event, team_id, slack_client).await
                 && let Err(e) = bridge.to_discord.send(bridge_event)
             {
                 eprintln!("Failed to send bridge event: {e}");
@@ -73,9 +75,41 @@ async fn push_event(
     }
 }
 
-fn create_bridge_event(
+async fn get_user_info(
+    user_id: Option<SlackUserId>,
+    slack_client: Arc<SlackHyperClient>,
+) -> (String, String) {
+    let oauth_token = std::env::var("SLACK_OAUTH_TOKEN").expect("SLACK_OAUTH_TOKEN must be set");
+    let slack_token = SlackApiToken::new(oauth_token.into());
+
+    let session = slack_client.open_session(&slack_token);
+
+    if let Some(user_id) = user_id
+        && let Ok(response) = session
+            .users_info(&SlackApiUsersInfoRequest::new(user_id))
+            .await
+        && let Some(profile) = response.user.profile
+    {
+        let name = profile
+            .display_name
+            .or(profile.real_name)
+            .unwrap_or_else(|| "Unknown User".to_string());
+
+        let avatar = profile
+            .icon
+            .and_then(|i| i.image_original)
+            .unwrap_or_default();
+
+        (name, avatar)
+    } else {
+        ("Unknown User".to_string(), "".to_string())
+    }
+}
+
+async fn create_bridge_event(
     message_event: SlackMessageEvent,
     team_id: SlackTeamId,
+    slack_client: Arc<SlackHyperClient>,
 ) -> Option<BridgeEvent> {
     // Extract common metadata
     let message_ts = message_event.origin.ts.to_string();
@@ -83,16 +117,8 @@ fn create_bridge_event(
     let team_id_str = team_id.to_string();
 
     // Extract user info
-    let author_name = message_event
-        .sender
-        .username
-        .unwrap_or("Unknown User".to_string());
-
-    let author_avatar = message_event
-        .sender
-        .user_profile
-        .and_then(|profile| profile.icon)
-        .and_then(|icon| icon.image_original);
+    let user_id = message_event.sender.user;
+    let (author_name, author_avatar) = get_user_info(user_id, slack_client).await;
 
     let event_type = match message_event.subtype {
         None => {
@@ -254,7 +280,8 @@ pub async fn start(
             ),
         )
         .layer(Extension(bridge_channels))
-        .layer(Extension(redis_client));
+        .layer(Extension(redis_client))
+        .layer(Extension(slack_client));
 
     axum::serve(TcpListener::bind(&addr).await.unwrap(), app)
         .await
