@@ -24,14 +24,6 @@ impl TypeMapKey for Data {
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Context<'a> = poise::Context<'a, Data, Error>;
 
-async fn get_data(ctx: &serenity::Context) -> Data {
-    let data = ctx.data.read().await;
-
-    data.get::<Data>()
-        .expect("Data not found in typemap")
-        .clone()
-}
-
 struct Handler;
 
 #[serenity::async_trait]
@@ -228,12 +220,15 @@ async fn handle_message_edit(
     }
 }
 
-async fn handle_bridge_event(ctx: &serenity::Context, team_id: &str, event: BridgeEvent) {
+async fn handle_bridge_event(
+    ctx: &serenity::Context,
+    team_id: &str,
+    event: BridgeEvent,
+    redis_client: &RedisClient,
+) {
     if event.team_id != team_id {
         return; // Ignore events from other workspaces
     }
-
-    let redis_client = get_data(ctx).await.redis_client;
 
     match &event.event_type {
         EventType::MessageSent {
@@ -288,7 +283,7 @@ pub async fn start(
     let intents = serenity::GatewayIntents::all();
     let data = Data {
         bridge: channels,
-        redis_client,
+        redis_client: redis_client.clone(),
         slack_client,
     };
 
@@ -316,7 +311,7 @@ pub async fn start(
                 let ctx_for_handler = ctx.clone();
                 tokio::spawn(async move {
                     while let Some(event) = discord_rx.recv().await {
-                        handle_bridge_event(&ctx_for_handler, &team_id, event).await;
+                        handle_bridge_event(&ctx_for_handler, &team_id, event, &redis_client).await;
                     }
                 });
 
